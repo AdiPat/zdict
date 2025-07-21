@@ -8,31 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2024-07-21
 
 ### Added
-- Initial release of zdict with five performance modes.
+- Initial release of zdict as an experimental dictionary implementation.
 - Complete dict-compatible API implementation.
-- C extension for high-performance operations.
+- C extension for potential performance improvements.
 - Pure Python fallback for environments without C compiler.
-- Comprehensive test suite with 96% coverage.
-- Performance benchmarking suite.
+- Comprehensive test suite with high coverage.
+- Performance benchmarking suite (base_benchmark.py).
 - Full type annotations for modern Python development.
-
-### Performance Modes
-- `mutable`: Standard dictionary with balanced performance.
-- `immutable`: Frozen, hashable dictionary for use as keys.
-- `readonly`: Optimized for maximum lookup performance.
-- `insert`: Append-only dictionary for log-like workloads.
-- `arena`: Pre-allocated dictionary with stable memory layout.
 
 ### Features
 - 100% compatible with built-in dict API.
-- Up to 10x faster lookups for read-heavy workloads.
-- Up to 40% faster insertions for append-only patterns.
-- Memory-efficient implementations for specialized use cases.
-- Thread-safe operations for immutable modes.
+- Simple drop-in replacement for Python's dict.
+- No external dependencies.
+- Thread-safe operations (inheriting from Python's dict).
 - Comprehensive error handling with descriptive messages.
 
 ### Documentation
-- Professional README with usage examples.
+- README with experimental disclaimers and usage examples.
 - API reference documentation.
 - Performance benchmarking guide.
 - Contributing guidelines.
