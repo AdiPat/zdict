@@ -2,33 +2,87 @@
 #include <Python.h>
 #include <structmember.h>
 #include <string.h>
+#include "swisstbl.h"
 
-/* Forward declarations */
 static PyTypeObject ZDictType;
 
-/* ZDict object structure */
 typedef struct {
     PyObject_HEAD
-    PyObject *data;      /* Internal dict storage */
+    SwissTable table;
 } ZDict;
 
+/* Utility: insert all items from a dict */
+static int insert_from_dict(ZDict *self, PyObject *d) {
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(d, &pos, &key, &value)) {
+        if (swiss_set(&self->table, key, value) < 0)
+            return -1;
+    }
+    return 0;
+}
+/* Utility: insert from mapping (anything with .items()) */
+static int insert_from_mapping(ZDict *self, PyObject *mapping) {
+    PyObject *items = PyObject_CallMethod(mapping, "items", NULL);
+    if (!items) return -1;
+    PyObject *iter = PyObject_GetIter(items);
+    Py_DECREF(items);
+    if (!iter) return -1;
+    PyObject *item;
+    while ((item = PyIter_Next(iter))) {
+        if (!PyTuple_Check(item) || PyTuple_Size(item) != 2) {
+            Py_DECREF(item); Py_DECREF(iter);
+            PyErr_SetString(PyExc_ValueError, "Each item must be a 2-tuple");
+            return -1;
+        }
+        PyObject *key = PyTuple_GetItem(item, 0);
+        PyObject *value = PyTuple_GetItem(item, 1);
+        if (swiss_set(&self->table, key, value) < 0) {
+            Py_DECREF(item); Py_DECREF(iter); return -1;
+        }
+        Py_DECREF(item);
+    }
+    Py_DECREF(iter);
+    if (PyErr_Occurred()) return -1;
+    return 0;
+}
+/* Utility: insert from iterable of pairs */
+static int insert_from_iterable(ZDict *self, PyObject *data) {
+    PyObject *iter = PyObject_GetIter(data);
+    if (!iter) {
+        PyErr_SetString(PyExc_TypeError, "data must be dict, mapping, or iterable of pairs");
+        return -1;
+    }
+    PyObject *item;
+    while ((item = PyIter_Next(iter))) {
+        if (!PyTuple_Check(item) || PyTuple_Size(item) != 2) {
+            Py_DECREF(item); Py_DECREF(iter);
+            PyErr_SetString(PyExc_ValueError, "Each item must be a 2-tuple");
+            return -1;
+        }
+        PyObject *key = PyTuple_GetItem(item, 0);
+        PyObject *value = PyTuple_GetItem(item, 1);
+        if (swiss_set(&self->table, key, value) < 0) {
+            Py_DECREF(item); Py_DECREF(iter); return -1;
+        }
+        Py_DECREF(item);
+    }
+    Py_DECREF(iter);
+    if (PyErr_Occurred()) return -1;
+    return 0;
+}
 
-/* ZDict methods */
-static void
-ZDict_dealloc(ZDict *self)
-{
-    Py_XDECREF(self->data);
+/* Deallocate */
+static void ZDict_dealloc(ZDict *self) {
+    swiss_free(&self->table);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *
-ZDict_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
-{
-    ZDict *self;
-    self = (ZDict *)type->tp_alloc(type, 0);
+/* New */
+static PyObject *ZDict_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    ZDict *self = (ZDict *)type->tp_alloc(type, 0);
     if (self != NULL) {
-        self->data = PyDict_New();
-        if (self->data == NULL) {
+        if (swiss_init(&self->table, 16) != 0) {
             Py_DECREF(self);
             return NULL;
         }
@@ -36,426 +90,270 @@ ZDict_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return (PyObject *)self;
 }
 
-static int
-ZDict_init(ZDict *self, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {"data", NULL};
+/* Init: real dict API */
+static int ZDict_init(ZDict *self, PyObject *args, PyObject *kwds) {
     PyObject *data = NULL;
-    
-    /* Parse only the known arguments first */
-    PyObject *filtered_kwds = PyDict_New();
-    if (filtered_kwds == NULL)
+    if (!PyArg_ParseTuple(args, "|O", &data))
         return -1;
-    
-    if (!PyArg_ParseTupleAndKeywords(args, filtered_kwds, "|O", kwlist, &data)) {
-        Py_DECREF(filtered_kwds);
-        return -1;
-    }
-    Py_DECREF(filtered_kwds);
-    
-    /* Initialize data */
-    if (data != NULL) {
+
+    /* Insert from data arg */
+    if (data) {
         if (PyDict_Check(data)) {
-            if (PyDict_Update(self->data, data) < 0)
-                return -1;
+            if (insert_from_dict(self, data) < 0) return -1;
+        } else if (PyObject_HasAttrString(data, "items")) {
+            if (insert_from_mapping(self, data) < 0) return -1;
         } else {
-            /* Check if it has items() method (mapping-like) */
-            PyObject *items_method = PyObject_GetAttrString(data, "items");
-            if (items_method != NULL) {
-                Py_DECREF(items_method);
-                PyObject *items = PyMapping_Items(data);
-                if (items == NULL)
-                    return -1;
-                
-                Py_ssize_t size = PyList_Size(items);
-                for (Py_ssize_t i = 0; i < size; i++) {
-                    PyObject *item = PyList_GetItem(items, i);
-                    PyObject *key = PyTuple_GetItem(item, 0);
-                    PyObject *value = PyTuple_GetItem(item, 1);
-                    if (PyDict_SetItem(self->data, key, value) < 0) {
-                        Py_DECREF(items);
-                        return -1;
-                    }
-                }
-                Py_DECREF(items);
-            } else {
-                /* Clear the AttributeError */
-                PyErr_Clear();
-                
-                /* Try as iterable of pairs */
-                PyObject *iter = PyObject_GetIter(data);
-                if (iter == NULL) {
-                    PyErr_SetString(PyExc_TypeError, "data must be dict, mapping, or iterable of pairs");
-                    return -1;
-                }
-                
-                PyObject *item;
-                while ((item = PyIter_Next(iter)) != NULL) {
-                    if (!PyTuple_Check(item) || PyTuple_Size(item) != 2) {
-                        Py_DECREF(item);
-                        Py_DECREF(iter);
-                        PyErr_SetString(PyExc_ValueError, "Each item must be a 2-tuple");
-                        return -1;
-                    }
-                    
-                    PyObject *key = PyTuple_GetItem(item, 0);
-                    PyObject *value = PyTuple_GetItem(item, 1);
-                    if (PyDict_SetItem(self->data, key, value) < 0) {
-                        Py_DECREF(item);
-                        Py_DECREF(iter);
-                        return -1;
-                    }
-                    Py_DECREF(item);
-                }
-                Py_DECREF(iter);
-                
-                if (PyErr_Occurred())
-                    return -1;
-            }
+            if (insert_from_iterable(self, data) < 0) return -1;
         }
     }
-    
-    /* Add keyword arguments */
-    if (kwds != NULL) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            const char *key_str = PyUnicode_AsUTF8AndSize(key, NULL);
-            if (key_str && strcmp(key_str, "data") == 0)
-                continue;
-            
-            if (PyDict_SetItem(self->data, key, value) < 0)
-                return -1;
-        }
+    /* Insert from keyword args */
+    if (kwds && PyDict_Size(kwds) > 0) {
+        if (insert_from_dict(self, kwds) < 0) return -1;
     }
-    
     return 0;
 }
 
 /* Sequence protocol */
-static Py_ssize_t
-ZDict_length(ZDict *self)
-{
-    return PyDict_Size(self->data);
+static Py_ssize_t ZDict_length(ZDict *self) {
+    return (Py_ssize_t)self->table.size;
 }
-
-static PyObject *
-ZDict_getitem(ZDict *self, PyObject *key)
-{
-    PyObject *value = PyDict_GetItem(self->data, key);
+static PyObject *ZDict_getitem(ZDict *self, PyObject *key) {
+    PyObject *value = swiss_get(&self->table, key);
     if (value == NULL) {
         PyErr_SetObject(PyExc_KeyError, key);
         return NULL;
     }
-    Py_INCREF(value);
     return value;
 }
-
-static int
-ZDict_setitem(ZDict *self, PyObject *key, PyObject *value)
-{
+static int ZDict_setitem(ZDict *self, PyObject *key, PyObject *value) {
     if (value == NULL) {
-        /* Delete item */
-        return PyDict_DelItem(self->data, key);
+        return swiss_del(&self->table, key);
     } else {
-        /* Set item */
-        return PyDict_SetItem(self->data, key, value);
+        return swiss_set(&self->table, key, value);
     }
 }
-
-static int
-ZDict_contains(ZDict *self, PyObject *key)
-{
-    return PyDict_Contains(self->data, key);
-}
-
-/* Iterator support */
-static PyObject *
-ZDict_iter(ZDict *self)
-{
-    return PyObject_GetIter(self->data);
-}
-
-/* Methods */
-static PyObject *
-ZDict_keys(ZDict *self, PyObject *Py_UNUSED(ignored))
-{
-    return PyDict_Keys(self->data);
-}
-
-static PyObject *
-ZDict_values(ZDict *self, PyObject *Py_UNUSED(ignored))
-{
-    return PyDict_Values(self->data);
-}
-
-static PyObject *
-ZDict_items(ZDict *self, PyObject *Py_UNUSED(ignored))
-{
-    return PyDict_Items(self->data);
-}
-
-static PyObject *
-ZDict_get(ZDict *self, PyObject *args)
-{
-    PyObject *key;
-    PyObject *default_value = Py_None;
-    
-    if (!PyArg_ParseTuple(args, "O|O:get", &key, &default_value))
-        return NULL;
-    
-    PyObject *value = PyDict_GetItem(self->data, key);
-    if (value == NULL) {
-        Py_INCREF(default_value);
-        return default_value;
+static int ZDict_contains(ZDict *self, PyObject *key) {
+    PyObject *val = swiss_get(&self->table, key);
+    if (val) {
+        Py_DECREF(val);
+        return 1;
     }
-    Py_INCREF(value);
-    return value;
+    return 0;
 }
 
-static PyObject *
-ZDict_pop(ZDict *self, PyObject *args)
-{
-    PyObject *key;
-    PyObject *default_value = NULL;
-    
+/* Iter (keys only) */
+static PyObject *ZDict_iter(ZDict *self) {
+    PyObject *keys_list = PyList_New(0);
+    if (!keys_list) return NULL;
+    for (size_t i = 0; i < self->table.capacity; ++i) {
+        if (self->table.keys[i] && self->table.keys[i] != (PyObject*)-1) {
+            PyList_Append(keys_list, self->table.keys[i]);
+        }
+    }
+    PyObject *it = PyObject_GetIter(keys_list);
+    Py_DECREF(keys_list);
+    return it;
+}
+
+static PyObject *ZDict_keys(ZDict *self, PyObject *Py_UNUSED(ignored)) {
+    return ZDict_iter(self);
+}
+static PyObject *ZDict_values(ZDict *self, PyObject *Py_UNUSED(ignored)) {
+    PyObject *vals_list = PyList_New(0);
+    if (!vals_list) return NULL;
+    for (size_t i = 0; i < self->table.capacity; ++i) {
+        if (self->table.keys[i] && self->table.keys[i] != (PyObject*)-1)
+            PyList_Append(vals_list, self->table.values[i]);
+    }
+    return vals_list;
+}
+static PyObject *ZDict_items(ZDict *self, PyObject *Py_UNUSED(ignored)) {
+    PyObject *items_list = PyList_New(0);
+    if (!items_list) return NULL;
+    for (size_t i = 0; i < self->table.capacity; ++i) {
+        if (self->table.keys[i] && self->table.keys[i] != (PyObject*)-1) {
+            PyObject *t = PyTuple_Pack(2, self->table.keys[i], self->table.values[i]);
+            if (t) PyList_Append(items_list, t);
+            Py_XDECREF(t);
+        }
+    }
+    return items_list;
+}
+
+/* pop(key[, default]) */
+static PyObject *ZDict_pop(ZDict *self, PyObject *args) {
+    PyObject *key, *default_value = NULL;
     if (!PyArg_ParseTuple(args, "O|O:pop", &key, &default_value))
         return NULL;
-    
-    PyObject *value = PyDict_GetItem(self->data, key);
-    if (value == NULL) {
-        if (default_value == NULL) {
-            PyErr_SetObject(PyExc_KeyError, key);
-            return NULL;
-        }
+    PyObject *val = swiss_get(&self->table, key);
+    if (val) {
+        if (swiss_del(&self->table, key) == 0)
+            return val;
+        Py_DECREF(val);
+        Py_RETURN_NONE;
+    } else if (default_value) {
         Py_INCREF(default_value);
         return default_value;
-    }
-    
-    Py_INCREF(value);
-    if (PyDict_DelItem(self->data, key) < 0) {
-        Py_DECREF(value);
+    } else {
+        PyErr_SetObject(PyExc_KeyError, key);
         return NULL;
     }
-    
-    return value;
 }
 
-static PyObject *
-ZDict_popitem(ZDict *self, PyObject *Py_UNUSED(ignored))
-{
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    
-    if (!PyDict_Next(self->data, &pos, &key, &value)) {
-        PyErr_SetString(PyExc_KeyError, "popitem(): dictionary is empty");
-        return NULL;
-    }
-    
-    PyObject *result = PyTuple_Pack(2, key, value);
-    if (result == NULL)
-        return NULL;
-    
-    if (PyDict_DelItem(self->data, key) < 0) {
-        Py_DECREF(result);
-        return NULL;
-    }
-    
-    return result;
-}
-
-static PyObject *
-ZDict_clear(ZDict *self, PyObject *Py_UNUSED(ignored))
-{
-    PyDict_Clear(self->data);
-    Py_RETURN_NONE;
-}
-
-static PyObject *
-ZDict_update(ZDict *self, PyObject *args, PyObject *kwds)
-{
-    if (PyTuple_Size(args) > 0) {
-        PyObject *other = PyTuple_GetItem(args, 0);
-        
-        if (PyDict_Check(other)) {
-            if (PyDict_Update(self->data, other) < 0)
-                return NULL;
-        } else {
-            /* Try as mapping or iterable */
-            PyObject *keys_method = PyObject_GetAttrString(other, "keys");
-            if (keys_method != NULL) {
-                Py_DECREF(keys_method);
-                /* It's a mapping */
-                if (PyDict_Update(self->data, other) < 0)
-                    return NULL;
-            } else {
-                /* Clear AttributeError */
-                PyErr_Clear();
-                
-                /* Try as iterable of pairs */
-                PyObject *iter = PyObject_GetIter(other);
-                if (iter == NULL) {
-                    PyErr_SetString(PyExc_TypeError, 
-                                    "update() argument must be dict, mapping, or iterable of pairs");
-                    return NULL;
-                }
-                
-                PyObject *item;
-                while ((item = PyIter_Next(iter)) != NULL) {
-                    if (!PyTuple_Check(item) || PyTuple_Size(item) != 2) {
-                        Py_DECREF(item);
-                        Py_DECREF(iter);
-                        PyErr_SetString(PyExc_ValueError, "update sequence element must be 2-tuple");
-                        return NULL;
-                    }
-                    
-                    PyObject *key = PyTuple_GetItem(item, 0);
-                    PyObject *value = PyTuple_GetItem(item, 1);
-                    if (PyDict_SetItem(self->data, key, value) < 0) {
-                        Py_DECREF(item);
-                        Py_DECREF(iter);
-                        return NULL;
-                    }
-                    Py_DECREF(item);
-                }
-                Py_DECREF(iter);
+/* popitem() */
+static PyObject *ZDict_popitem(ZDict *self, PyObject *Py_UNUSED(ignored)) {
+    for (size_t i = 0; i < self->table.capacity; ++i) {
+        if (self->table.keys[i] && self->table.keys[i] != (PyObject*)-1) {
+            PyObject *key = self->table.keys[i];
+            PyObject *val = self->table.values[i];
+            Py_INCREF(key); Py_INCREF(val);
+            if (swiss_del(&self->table, key) == 0) {
+                return PyTuple_Pack(2, key, val);
             }
+            Py_DECREF(key); Py_DECREF(val);
         }
     }
-    
-    if (kwds && PyDict_Update(self->data, kwds) < 0)
-        return NULL;
-    
-    Py_RETURN_NONE;
+    PyErr_SetString(PyExc_KeyError, "popitem(): dictionary is empty");
+    return NULL;
 }
 
-static PyObject *
-ZDict_copy(ZDict *self, PyObject *Py_UNUSED(ignored))
-{
-    /* Create a new ZDict instance */
-    ZDict *new_zdict = (ZDict *)ZDict_new(&ZDictType, NULL, NULL);
-    if (new_zdict == NULL)
-        return NULL;
-    
-    /* Copy the data */
-    Py_DECREF(new_zdict->data);
-    new_zdict->data = PyDict_Copy(self->data);
-    if (new_zdict->data == NULL) {
-        Py_DECREF(new_zdict);
-        return NULL;
-    }
-    
-    return (PyObject *)new_zdict;
-}
-
-static PyObject *
-ZDict_setdefault(ZDict *self, PyObject *args)
-{
-    PyObject *key;
-    PyObject *default_value = Py_None;
-    
+/* setdefault(key[, default]) */
+static PyObject *ZDict_setdefault(ZDict *self, PyObject *args) {
+    PyObject *key, *default_value = Py_None;
     if (!PyArg_ParseTuple(args, "O|O:setdefault", &key, &default_value))
         return NULL;
-    
-    PyObject *value = PyDict_GetItem(self->data, key);
-    if (value == NULL) {
-        if (PyDict_SetItem(self->data, key, default_value) < 0)
-            return NULL;
-        
+    PyObject *val = swiss_get(&self->table, key);
+    if (val) return val;
+    if (swiss_set(&self->table, key, default_value) == 0) {
         Py_INCREF(default_value);
         return default_value;
     }
-    
-    Py_INCREF(value);
+    return NULL;
+}
+
+/* update(other) */
+static PyObject *ZDict_update(ZDict *self, PyObject *args, PyObject *kwds) {
+    if (args && PyTuple_Size(args) > 0) {
+        PyObject *other = PyTuple_GetItem(args, 0);
+        if (PyDict_Check(other)) {
+            if (insert_from_dict(self, other) < 0) return NULL;
+        } else if (PyObject_HasAttrString(other, "items")) {
+            if (insert_from_mapping(self, other) < 0) return NULL;
+        } else {
+            if (insert_from_iterable(self, other) < 0) return NULL;
+        }
+    }
+    if (kwds && PyDict_Size(kwds) > 0) {
+        if (insert_from_dict(self, kwds) < 0) return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+/* copy() */
+static PyObject *ZDict_copy(ZDict *self, PyObject *Py_UNUSED(ignored)) {
+    PyObject *new_obj = ZDict_new(&ZDictType, NULL, NULL);
+    if (!new_obj) return NULL;
+    PyObject *items = ZDict_items(self, NULL);
+    if (!items) return NULL;
+    ZDict_init((ZDict *)new_obj, PyTuple_Pack(1, items), NULL);
+    Py_DECREF(items);
+    return new_obj;
+}
+
+/* get(key[, default]) */
+static PyObject *ZDict_get(ZDict *self, PyObject *args) {
+    PyObject *key;
+    PyObject *default_value = Py_None;
+    if (!PyArg_ParseTuple(args, "O|O:get", &key, &default_value))
+        return NULL;
+    PyObject *value = swiss_get(&self->table, key);
+    if (value == NULL) {
+        Py_INCREF(default_value);
+        return default_value;
+    }
     return value;
+}
+
+static PyObject *ZDict_clear(ZDict *self, PyObject *Py_UNUSED(ignored)) {
+    swiss_clear(&self->table);
+    Py_RETURN_NONE;
 }
 
 /* Rich comparison */
-static PyObject *
-ZDict_richcompare(PyObject *self, PyObject *other, int op)
-{
+static PyObject *ZDict_richcompare(PyObject *self, PyObject *other, int op) {
     if (op != Py_EQ && op != Py_NE) {
         Py_RETURN_NOTIMPLEMENTED;
     }
-    
     ZDict *zd_self = (ZDict *)self;
-    PyObject *self_dict = zd_self->data;
-    PyObject *other_dict = NULL;
-    
-    if (Py_TYPE(other) == &ZDictType) {
-        other_dict = ((ZDict *)other)->data;
-    } else if (PyDict_Check(other)) {
-        other_dict = other;
-    } else {
-        if (op == Py_EQ)
-            Py_RETURN_FALSE;
-        else
-            Py_RETURN_TRUE;
+    PyObject *self_items = ZDict_items(zd_self, NULL);
+    PyObject *other_items = NULL;
+    if (Py_TYPE(other) == &ZDictType)
+        other_items = ZDict_items((ZDict *)other, NULL);
+    else if (PyDict_Check(other))
+        other_items = PyMapping_Items(other);
+    else {
+        Py_RETURN_NOTIMPLEMENTED;
     }
-    
-    int result = PyObject_RichCompareBool(self_dict, other_dict, Py_EQ);
-    if (result < 0)
-        return NULL;
-    
+    int result = PyObject_RichCompareBool(self_items, other_items, Py_EQ);
+    Py_DECREF(self_items);
+    Py_DECREF(other_items);
+    if (result < 0) return NULL;
     if (op == Py_EQ)
         return PyBool_FromLong(result);
     else
         return PyBool_FromLong(!result);
 }
 
-/* Hash support */
-static Py_hash_t
-ZDict_hash(ZDict *self)
-{
+static Py_hash_t ZDict_hash(ZDict *self) {
     PyErr_SetString(PyExc_TypeError, "unhashable type: 'zdict'");
     return -1;
 }
 
-/* String representation */
-static PyObject *
-ZDict_repr(ZDict *self)
-{
-    PyObject *dict_repr = PyObject_Repr(self->data);
+static PyObject *ZDict_repr(ZDict *self) {
+    PyObject *items = ZDict_items(self, NULL);
+    PyObject *dict_repr = PyObject_Repr(items);
+    Py_DECREF(items);
     if (dict_repr == NULL)
         return NULL;
-    
     PyObject *result = PyUnicode_FromFormat("zdict(%U)", dict_repr);
     Py_DECREF(dict_repr);
     return result;
 }
 
-static PyObject *
-ZDict_str(ZDict *self)
-{
-    return PyObject_Str(self->data);
+static PyObject *ZDict_str(ZDict *self) {
+    PyObject *py_dict = PyDict_New();
+    for (size_t i = 0; i < self->table.capacity; ++i) {
+        if (self->table.keys[i] && self->table.keys[i] != (PyObject*)-1) {
+            PyDict_SetItem(py_dict, self->table.keys[i], self->table.values[i]);
+        }
+    }
+    PyObject *result = PyObject_Str(py_dict);
+    Py_DECREF(py_dict);
+    return result;
 }
 
 
-/* Method definitions */
+/* Methods */
 static PyMethodDef ZDict_methods[] = {
-    {"keys", (PyCFunction)ZDict_keys, METH_NOARGS, "Return a view of the dict's keys"},
-    {"values", (PyCFunction)ZDict_values, METH_NOARGS, "Return a view of the dict's values"},
-    {"items", (PyCFunction)ZDict_items, METH_NOARGS, "Return a view of the dict's items"},
-    {"get", (PyCFunction)ZDict_get, METH_VARARGS, "Get item with default"},
-    {"pop", (PyCFunction)ZDict_pop, METH_VARARGS, "Remove and return item"},
-    {"popitem", (PyCFunction)ZDict_popitem, METH_NOARGS, "Remove and return arbitrary item"},
-    {"clear", (PyCFunction)ZDict_clear, METH_NOARGS, "Remove all items"},
-    {"update", (PyCFunction)ZDict_update, METH_VARARGS | METH_KEYWORDS, "Update dict with items from another dict or iterable"},
-    {"copy", (PyCFunction)ZDict_copy, METH_NOARGS, "Return a shallow copy"},
-    {"setdefault", (PyCFunction)ZDict_setdefault, METH_VARARGS, "Insert key with default if not present"},
+    {"keys",      (PyCFunction)ZDict_keys,      METH_NOARGS,  "Return a view of the dict's keys"},
+    {"values",    (PyCFunction)ZDict_values,    METH_NOARGS,  "Return a view of the dict's values"},
+    {"items",     (PyCFunction)ZDict_items,     METH_NOARGS,  "Return a view of the dict's items"},
+    {"get",       (PyCFunction)ZDict_get,       METH_VARARGS, "Get item with default"},
+    {"clear",     (PyCFunction)ZDict_clear,     METH_NOARGS,  "Remove all items"},
+    {"pop",       (PyCFunction)ZDict_pop,       METH_VARARGS, "Pop an item"},
+    {"popitem",   (PyCFunction)ZDict_popitem,   METH_NOARGS,  "Pop any item"},
+    {"setdefault",(PyCFunction)ZDict_setdefault,METH_VARARGS, "Set default for key"},
+    {"update",    (PyCFunction)ZDict_update,    METH_VARARGS | METH_KEYWORDS, "Update from another dict or iterable"},
+    {"copy",      (PyCFunction)ZDict_copy,      METH_NOARGS,  "Shallow copy"},
     {NULL}  /* Sentinel */
 };
 
-
-/* Mapping methods */
 static PyMappingMethods ZDict_as_mapping = {
     (lenfunc)ZDict_length,          /* mp_length */
     (binaryfunc)ZDict_getitem,      /* mp_subscript */
     (objobjargproc)ZDict_setitem    /* mp_ass_subscript */
 };
 
-/* Sequence methods (for 'in' operator) */
 static PySequenceMethods ZDict_as_sequence = {
     0,                              /* sq_length */
     0,                              /* sq_concat */
@@ -467,11 +365,10 @@ static PySequenceMethods ZDict_as_sequence = {
     (objobjproc)ZDict_contains,     /* sq_contains */
 };
 
-/* Type object */
 static PyTypeObject ZDictType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "zdict.zdict",
-    .tp_doc = "High-performance dict implementation",
+    .tp_doc = "High-performance dict implementation (SwissTable)",
     .tp_basicsize = sizeof(ZDict),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -488,34 +385,27 @@ static PyTypeObject ZDictType = {
     .tp_richcompare = ZDict_richcompare,
 };
 
-/* Module definition */
 static PyModuleDef zdictmodule = {
     PyModuleDef_HEAD_INIT,
     .m_name = "_zdictcore",
-    .m_doc = "C extension for zdict",
+    .m_doc = "C extension for zdict using Swiss Table backend",
     .m_size = -1,
 };
 
-/* Module initialization */
 PyMODINIT_FUNC
 PyInit__zdictcore(void)
 {
     PyObject *m;
-    
     if (PyType_Ready(&ZDictType) < 0)
         return NULL;
-    
     m = PyModule_Create(&zdictmodule);
     if (m == NULL)
         return NULL;
-    
     Py_INCREF(&ZDictType);
     if (PyModule_AddObject(m, "ZDict", (PyObject *)&ZDictType) < 0) {
         Py_DECREF(&ZDictType);
         Py_DECREF(m);
         return NULL;
     }
-    
-    
     return m;
 }

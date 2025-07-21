@@ -10,7 +10,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 ext_modules = [
     Extension(
         "zdict._zdictcore",
-        sources=["zdict/_zdictcore.c"],
+        sources=["zdict/_zdictcore.c", "zdict/swisstbl.c"],
         extra_compile_args=(
             ["-O3", "-Wall", "-Wextra"] if sys.platform != "win32" else ["/O2"]
         ),
