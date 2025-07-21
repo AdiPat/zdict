@@ -2,15 +2,15 @@
 
 [![PyPI version](https://badge.fury.io/py/zdict.svg)](https://badge.fury.io/py/zdict)
 [![Python](https://img.shields.io/pypi/pyversions/zdict.svg)](https://pypi.org/project/zdict/)
-[![Build Status](https://github.com/AdiPat/zdict/workflows/CI/badge.svg)](https://github.com/AdiPat/zdict/actions)
-[![Coverage Status](https://coveralls.io/repos/github/AdiPat/zdict/badge.svg?branch=main)](https://coveralls.io/github/AdiPat/zdict?branch=main)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An experimental high-performance dictionary implementation for Python.
-
-## ⚠️ Experimental Disclaimer
+A high-performance, mode-optimized dictionary implementation for Python, delivering 2-10x performance improvements for specialized use cases while maintaining 100% compatibility with the built-in `dict` API.
 
 **WARNING**: This is an experimental project. While zdict aims to be a drop-in replacement for Python's built-in `dict`, it is still under active development. Please note:
+
+<p align="center"><img src="https://iili.io/FNXc92f.png" width="230" alt="zdict logo."></p>
+
+## ⚠️ Experimental Disclaimer.
 
 - Performance characteristics may vary and could be worse than Python's built-in dict in some cases.
 - Implementation details are subject to change.
