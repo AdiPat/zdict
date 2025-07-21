@@ -2,7 +2,6 @@
 #include <Python.h>
 #include <structmember.h>
 #include <string.h>
-#include "_zdict_modes/zdict_internal.h"
 
 /* Forward declarations */
 static PyTypeObject ZDictType;
@@ -11,60 +10,8 @@ static PyTypeObject ZDictType;
 typedef struct {
     PyObject_HEAD
     PyObject *data;      /* Internal dict storage */
-    int mode;            /* Current mode */
-    Py_hash_t hash;      /* Cached hash for immutable mode */
-    int hash_computed;   /* Whether hash has been computed */
 } ZDict;
 
-/* Mode constants */
-enum {
-    MODE_MUTABLE = 0,
-    MODE_IMMUTABLE = 1,
-    MODE_READONLY = 2,
-    MODE_INSERT = 3,
-    MODE_ARENA = 4
-};
-
-/* Mode names for error messages */
-static const char *mode_names[] = {
-    "mutable",
-    "immutable",
-    "readonly",
-    "insert",
-    "arena"
-};
-
-/* Helper function to get mode from string */
-static int get_mode_from_string(const char *mode_str) {
-    if (strcmp(mode_str, "mutable") == 0) return MODE_MUTABLE;
-    if (strcmp(mode_str, "immutable") == 0) return MODE_IMMUTABLE;
-    if (strcmp(mode_str, "readonly") == 0) return MODE_READONLY;
-    if (strcmp(mode_str, "insert") == 0) return MODE_INSERT;
-    if (strcmp(mode_str, "arena") == 0) return MODE_ARENA;
-    return -1;
-}
-
-/* Check if mutation is allowed */
-static int check_mutable(ZDict *self) {
-    if (self->mode == MODE_IMMUTABLE || self->mode == MODE_READONLY || self->mode == MODE_INSERT) {
-        PyErr_Format(PyExc_TypeError, 
-                     "Cannot modify zdict in '%s' mode", 
-                     mode_names[self->mode]);
-        return 0;
-    }
-    return 1;
-}
-
-/* Check if insertion is allowed */
-static int check_insertable(ZDict *self) {
-    if (self->mode == MODE_READONLY || self->mode == MODE_IMMUTABLE) {
-        PyErr_Format(PyExc_TypeError,
-                     "Cannot insert into zdict in '%s' mode",
-                     mode_names[self->mode]);
-        return 0;
-    }
-    return 1;
-}
 
 /* ZDict methods */
 static void
@@ -85,9 +32,6 @@ ZDict_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
             Py_DECREF(self);
             return NULL;
         }
-        self->mode = MODE_MUTABLE;
-        self->hash = 0;
-        self->hash_computed = 0;
     }
     return (PyObject *)self;
 }
@@ -95,38 +39,19 @@ ZDict_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 static int
 ZDict_init(ZDict *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"data", "mode", NULL};
+    static char *kwlist[] = {"data", NULL};
     PyObject *data = NULL;
-    const char *mode_str = "mutable";
     
     /* Parse only the known arguments first */
     PyObject *filtered_kwds = PyDict_New();
     if (filtered_kwds == NULL)
         return -1;
-        
-    if (kwds != NULL) {
-        PyObject *mode_obj = PyDict_GetItemString(kwds, "mode");
-        if (mode_obj != NULL) {
-            if (PyDict_SetItemString(filtered_kwds, "mode", mode_obj) < 0) {
-                Py_DECREF(filtered_kwds);
-                return -1;
-            }
-        }
-    }
     
-    if (!PyArg_ParseTupleAndKeywords(args, filtered_kwds, "|Os", kwlist, &data, &mode_str)) {
+    if (!PyArg_ParseTupleAndKeywords(args, filtered_kwds, "|O", kwlist, &data)) {
         Py_DECREF(filtered_kwds);
         return -1;
     }
     Py_DECREF(filtered_kwds);
-    
-    /* Set mode */
-    int mode = get_mode_from_string(mode_str);
-    if (mode == -1) {
-        PyErr_Format(PyExc_ValueError, "Unsupported mode '%s'", mode_str);
-        return -1;
-    }
-    self->mode = mode;
     
     /* Initialize data */
     if (data != NULL) {
@@ -197,7 +122,7 @@ ZDict_init(ZDict *self, PyObject *args, PyObject *kwds)
         
         while (PyDict_Next(kwds, &pos, &key, &value)) {
             const char *key_str = PyUnicode_AsUTF8AndSize(key, NULL);
-            if (key_str && (strcmp(key_str, "data") == 0 || strcmp(key_str, "mode") == 0))
+            if (key_str && strcmp(key_str, "data") == 0)
                 continue;
             
             if (PyDict_SetItem(self->data, key, value) < 0)
@@ -232,19 +157,9 @@ ZDict_setitem(ZDict *self, PyObject *key, PyObject *value)
 {
     if (value == NULL) {
         /* Delete item */
-        if (!check_mutable(self))
-            return -1;
         return PyDict_DelItem(self->data, key);
     } else {
         /* Set item */
-        if (self->mode == MODE_INSERT && PyDict_Contains(self->data, key)) {
-            PyErr_SetString(PyExc_TypeError, "Cannot update existing keys in 'insert' mode");
-            return -1;
-        }
-        
-        if (!check_insertable(self))
-            return -1;
-        
         return PyDict_SetItem(self->data, key, value);
     }
 }
@@ -308,9 +223,6 @@ ZDict_pop(ZDict *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "O|O:pop", &key, &default_value))
         return NULL;
     
-    if (!check_mutable(self))
-        return NULL;
-    
     PyObject *value = PyDict_GetItem(self->data, key);
     if (value == NULL) {
         if (default_value == NULL) {
@@ -333,9 +245,6 @@ ZDict_pop(ZDict *self, PyObject *args)
 static PyObject *
 ZDict_popitem(ZDict *self, PyObject *Py_UNUSED(ignored))
 {
-    if (!check_mutable(self))
-        return NULL;
-    
     PyObject *key, *value;
     Py_ssize_t pos = 0;
     
@@ -359,9 +268,6 @@ ZDict_popitem(ZDict *self, PyObject *Py_UNUSED(ignored))
 static PyObject *
 ZDict_clear(ZDict *self, PyObject *Py_UNUSED(ignored))
 {
-    if (!check_mutable(self))
-        return NULL;
-    
     PyDict_Clear(self->data);
     Py_RETURN_NONE;
 }
@@ -369,125 +275,57 @@ ZDict_clear(ZDict *self, PyObject *Py_UNUSED(ignored))
 static PyObject *
 ZDict_update(ZDict *self, PyObject *args, PyObject *kwds)
 {
-    if (self->mode == MODE_READONLY || self->mode == MODE_IMMUTABLE) {
-        PyErr_Format(PyExc_TypeError, "Cannot update zdict in '%s' mode", mode_names[self->mode]);
-        return NULL;
-    }
-    
-    /* Handle insert mode special case */
-    if (self->mode == MODE_INSERT) {
-        /* First collect all updates */
-        PyObject *temp_dict = PyDict_New();
-        if (temp_dict == NULL)
-            return NULL;
+    if (PyTuple_Size(args) > 0) {
+        PyObject *other = PyTuple_GetItem(args, 0);
         
-        /* Process positional argument */
-        if (PyTuple_Size(args) > 0) {
-            PyObject *other = PyTuple_GetItem(args, 0);
-            if (PyDict_Check(other)) {
-                if (PyDict_Update(temp_dict, other) < 0) {
-                    Py_DECREF(temp_dict);
-                    return NULL;
-                }
-            } else if (PyMapping_Check(other)) {
-                PyObject *items = PyMapping_Items(other);
-                if (items == NULL) {
-                    Py_DECREF(temp_dict);
-                    return NULL;
-                }
-                
-                Py_ssize_t size = PyList_Size(items);
-                for (Py_ssize_t i = 0; i < size; i++) {
-                    PyObject *item = PyList_GetItem(items, i);
-                    PyObject *key = PyTuple_GetItem(item, 0);
-                    PyObject *value = PyTuple_GetItem(item, 1);
-                    if (PyDict_SetItem(temp_dict, key, value) < 0) {
-                        Py_DECREF(items);
-                        Py_DECREF(temp_dict);
-                        return NULL;
-                    }
-                }
-                Py_DECREF(items);
-            }
-        }
-        
-        /* Process keyword arguments */
-        if (kwds && PyDict_Update(temp_dict, kwds) < 0) {
-            Py_DECREF(temp_dict);
-            return NULL;
-        }
-        
-        /* Check for existing keys */
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(temp_dict, &pos, &key, &value)) {
-            if (PyDict_Contains(self->data, key)) {
-                Py_DECREF(temp_dict);
-                PyErr_SetString(PyExc_TypeError, "Cannot update existing keys in 'insert' mode");
+        if (PyDict_Check(other)) {
+            if (PyDict_Update(self->data, other) < 0)
                 return NULL;
-            }
-        }
-        
-        /* All good, perform update */
-        if (PyDict_Update(self->data, temp_dict) < 0) {
-            Py_DECREF(temp_dict);
-            return NULL;
-        }
-        Py_DECREF(temp_dict);
-    } else {
-        /* Normal update for mutable/arena modes */
-        if (PyTuple_Size(args) > 0) {
-            PyObject *other = PyTuple_GetItem(args, 0);
-            
-            if (PyDict_Check(other)) {
+        } else {
+            /* Try as mapping or iterable */
+            PyObject *keys_method = PyObject_GetAttrString(other, "keys");
+            if (keys_method != NULL) {
+                Py_DECREF(keys_method);
+                /* It's a mapping */
                 if (PyDict_Update(self->data, other) < 0)
                     return NULL;
             } else {
-                /* Try as mapping or iterable */
-                PyObject *keys_method = PyObject_GetAttrString(other, "keys");
-                if (keys_method != NULL) {
-                    Py_DECREF(keys_method);
-                    /* It's a mapping */
-                    if (PyDict_Update(self->data, other) < 0)
-                        return NULL;
-                } else {
-                    /* Clear AttributeError */
-                    PyErr_Clear();
-                    
-                    /* Try as iterable of pairs */
-                    PyObject *iter = PyObject_GetIter(other);
-                    if (iter == NULL) {
-                        PyErr_SetString(PyExc_TypeError, 
-                                        "update() argument must be dict, mapping, or iterable of pairs");
-                        return NULL;
-                    }
-                    
-                    PyObject *item;
-                    while ((item = PyIter_Next(iter)) != NULL) {
-                        if (!PyTuple_Check(item) || PyTuple_Size(item) != 2) {
-                            Py_DECREF(item);
-                            Py_DECREF(iter);
-                            PyErr_SetString(PyExc_ValueError, "update sequence element must be 2-tuple");
-                            return NULL;
-                        }
-                        
-                        PyObject *key = PyTuple_GetItem(item, 0);
-                        PyObject *value = PyTuple_GetItem(item, 1);
-                        if (PyDict_SetItem(self->data, key, value) < 0) {
-                            Py_DECREF(item);
-                            Py_DECREF(iter);
-                            return NULL;
-                        }
-                        Py_DECREF(item);
-                    }
-                    Py_DECREF(iter);
+                /* Clear AttributeError */
+                PyErr_Clear();
+                
+                /* Try as iterable of pairs */
+                PyObject *iter = PyObject_GetIter(other);
+                if (iter == NULL) {
+                    PyErr_SetString(PyExc_TypeError, 
+                                    "update() argument must be dict, mapping, or iterable of pairs");
+                    return NULL;
                 }
+                
+                PyObject *item;
+                while ((item = PyIter_Next(iter)) != NULL) {
+                    if (!PyTuple_Check(item) || PyTuple_Size(item) != 2) {
+                        Py_DECREF(item);
+                        Py_DECREF(iter);
+                        PyErr_SetString(PyExc_ValueError, "update sequence element must be 2-tuple");
+                        return NULL;
+                    }
+                    
+                    PyObject *key = PyTuple_GetItem(item, 0);
+                    PyObject *value = PyTuple_GetItem(item, 1);
+                    if (PyDict_SetItem(self->data, key, value) < 0) {
+                        Py_DECREF(item);
+                        Py_DECREF(iter);
+                        return NULL;
+                    }
+                    Py_DECREF(item);
+                }
+                Py_DECREF(iter);
             }
         }
-        
-        if (kwds && PyDict_Update(self->data, kwds) < 0)
-            return NULL;
     }
+    
+    if (kwds && PyDict_Update(self->data, kwds) < 0)
+        return NULL;
     
     Py_RETURN_NONE;
 }
@@ -508,15 +346,6 @@ ZDict_copy(ZDict *self, PyObject *Py_UNUSED(ignored))
         return NULL;
     }
     
-    /* Copy the mode */
-    new_zdict->mode = self->mode;
-    
-    /* Copy hash info for immutable mode */
-    if (self->mode == MODE_IMMUTABLE) {
-        new_zdict->hash = self->hash;
-        new_zdict->hash_computed = self->hash_computed;
-    }
-    
     return (PyObject *)new_zdict;
 }
 
@@ -531,9 +360,6 @@ ZDict_setdefault(ZDict *self, PyObject *args)
     
     PyObject *value = PyDict_GetItem(self->data, key);
     if (value == NULL) {
-        if (!check_insertable(self))
-            return NULL;
-        
         if (PyDict_SetItem(self->data, key, default_value) < 0)
             return NULL;
         
@@ -582,40 +408,8 @@ ZDict_richcompare(PyObject *self, PyObject *other, int op)
 static Py_hash_t
 ZDict_hash(ZDict *self)
 {
-    if (self->mode != MODE_IMMUTABLE) {
-        PyErr_Format(PyExc_TypeError, 
-                     "unhashable type: 'zdict' (mode='%s')", 
-                     mode_names[self->mode]);
-        return -1;
-    }
-    
-    if (!self->hash_computed) {
-        /* Compute hash from sorted items */
-        PyObject *items = PyDict_Items(self->data);
-        if (items == NULL)
-            return -1;
-        
-        if (PyList_Sort(items) < 0) {
-            Py_DECREF(items);
-            return -1;
-        }
-        
-        /* Convert to tuple for hashing */
-        PyObject *items_tuple = PyList_AsTuple(items);
-        Py_DECREF(items);
-        if (items_tuple == NULL)
-            return -1;
-        
-        self->hash = PyObject_Hash(items_tuple);
-        Py_DECREF(items_tuple);
-        
-        if (self->hash == -1)
-            return -1;
-        
-        self->hash_computed = 1;
-    }
-    
-    return self->hash;
+    PyErr_SetString(PyExc_TypeError, "unhashable type: 'zdict'");
+    return -1;
 }
 
 /* String representation */
@@ -626,9 +420,7 @@ ZDict_repr(ZDict *self)
     if (dict_repr == NULL)
         return NULL;
     
-    PyObject *result = PyUnicode_FromFormat("zdict(%U, mode='%s')", 
-                                            dict_repr, 
-                                            mode_names[self->mode]);
+    PyObject *result = PyUnicode_FromFormat("zdict(%U)", dict_repr);
     Py_DECREF(dict_repr);
     return result;
 }
@@ -639,12 +431,6 @@ ZDict_str(ZDict *self)
     return PyObject_Str(self->data);
 }
 
-/* Property getter for mode */
-static PyObject *
-ZDict_get_mode(ZDict *self, void *closure)
-{
-    return PyUnicode_FromString(mode_names[self->mode]);
-}
 
 /* Method definitions */
 static PyMethodDef ZDict_methods[] = {
@@ -661,11 +447,6 @@ static PyMethodDef ZDict_methods[] = {
     {NULL}  /* Sentinel */
 };
 
-/* Property definitions */
-static PyGetSetDef ZDict_getsetters[] = {
-    {"mode", (getter)ZDict_get_mode, NULL, "Current mode", NULL},
-    {NULL}  /* Sentinel */
-};
 
 /* Mapping methods */
 static PyMappingMethods ZDict_as_mapping = {
@@ -690,7 +471,7 @@ static PySequenceMethods ZDict_as_sequence = {
 static PyTypeObject ZDictType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "zdict.zdict",
-    .tp_doc = "High-performance dict implementation with configurable modes",
+    .tp_doc = "High-performance dict implementation",
     .tp_basicsize = sizeof(ZDict),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
@@ -704,7 +485,6 @@ static PyTypeObject ZDictType = {
     .tp_hash = (hashfunc)ZDict_hash,
     .tp_iter = (getiterfunc)ZDict_iter,
     .tp_methods = ZDict_methods,
-    .tp_getset = ZDict_getsetters,
     .tp_richcompare = ZDict_richcompare,
 };
 
@@ -736,12 +516,6 @@ PyInit__zdictcore(void)
         return NULL;
     }
     
-    /* Add mode constants */
-    PyModule_AddIntConstant(m, "MODE_MUTABLE", MODE_MUTABLE);
-    PyModule_AddIntConstant(m, "MODE_IMMUTABLE", MODE_IMMUTABLE);
-    PyModule_AddIntConstant(m, "MODE_READONLY", MODE_READONLY);
-    PyModule_AddIntConstant(m, "MODE_INSERT", MODE_INSERT);
-    PyModule_AddIntConstant(m, "MODE_ARENA", MODE_ARENA);
     
     return m;
 }

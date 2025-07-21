@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-zdict Demo - Showcasing performance modes and features.
+zdict Demo - Basic usage and performance comparison.
 """
 
 import time
-from uuid import uuid4
 from zdict import zdict, _C_EXTENSION_AVAILABLE
 
 
@@ -37,179 +36,118 @@ def demo_basic_usage():
         print(f"  {key}: {value}")
 
 
-def demo_immutable_mode():
-    """Demonstrate immutable mode features."""
-    separator("Immutable Mode - Hashable Dictionaries")
+def demo_dict_methods():
+    """Demonstrate various dict methods."""
+    separator("Dictionary Methods")
     
-    # Create immutable zdict
-    config1 = zdict({'host': 'localhost', 'port': 8080}, mode='immutable')
-    config2 = zdict({'host': 'localhost', 'port': 8080}, mode='immutable')
+    # Create sample data
+    d = zdict({'a': 1, 'b': 2, 'c': 3})
+    print(f"Original: {d}")
     
-    print(f"Config 1: {config1}")
-    print(f"Config 2: {config2}")
-    print(f"Configs are equal: {config1 == config2}")
-    print(f"Same hash: {hash(config1) == hash(config2)}")
+    # get() method
+    print(f"\nget('a'): {d.get('a')}")
+    print(f"get('z', 99): {d.get('z', 99)}")
     
-    # Use as dict key
-    cache = {}
-    cache[config1] = "cached_connection"
-    print(f"\nUsing as dict key: {cache}")
+    # pop() method
+    value = d.pop('b')
+    print(f"\nAfter pop('b'): {d}, popped value: {value}")
     
-    # Immutability demonstration
-    try:
-        config1['port'] = 9090
-    except TypeError as e:
-        print(f"\nCannot modify: {e}")
+    # update() method
+    d.update({'d': 4, 'e': 5})
+    print(f"After update: {d}")
+    
+    # setdefault() method
+    d.setdefault('f', 6)
+    d.setdefault('a', 100)  # Won't change existing value
+    print(f"After setdefault: {d}")
+    
+    # copy() method
+    d_copy = d.copy()
+    d_copy['g'] = 7
+    print(f"\nOriginal after copy modification: {d}")
+    print(f"Copy: {d_copy}")
 
 
-def demo_readonly_performance():
-    """Demonstrate readonly mode performance."""
-    separator("Readonly Mode - Optimized Lookups")
+def demo_performance_comparison():
+    """Compare performance with built-in dict."""
+    separator("Performance Comparison")
     
-    # Create large dataset
-    size = 10000
-    data = {f'key_{i}': f'value_{i}' for i in range(size)}
+    print("⚠️  Note: This is a simple demo. Use base_benchmark.py for detailed analysis.\n")
     
-    # Regular dict
-    regular = dict(data)
+    # Test data
+    test_size = 10000
+    test_data = {f'key_{i}': f'value_{i}' for i in range(test_size)}
     
-    # Readonly zdict
-    readonly = zdict(data, mode='readonly')
+    # Time dict creation
+    start = time.perf_counter()
+    regular = dict(test_data)
+    dict_time = time.perf_counter() - start
     
-    # Benchmark lookups
-    lookup_keys = [f'key_{i}' for i in range(0, size, 100)]
+    start = time.perf_counter()
+    z = zdict(test_data)
+    zdict_time = time.perf_counter() - start
     
-    # Time regular dict
+    print(f"Creation time ({test_size} items):")
+    print(f"  dict:  {dict_time*1000:.2f} ms")
+    print(f"  zdict: {zdict_time*1000:.2f} ms")
+    
+    # Time lookups
+    lookup_keys = list(test_data.keys())[:100]
+    
     start = time.perf_counter()
     for _ in range(1000):
         for key in lookup_keys:
             _ = regular[key]
-    regular_time = time.perf_counter() - start
+    dict_lookup_time = time.perf_counter() - start
     
-    # Time readonly zdict
     start = time.perf_counter()
     for _ in range(1000):
         for key in lookup_keys:
-            _ = readonly[key]
-    readonly_time = time.perf_counter() - start
+            _ = z[key]
+    zdict_lookup_time = time.perf_counter() - start
     
-    print(f"Dataset size: {size:,} items")
-    print(f"Regular dict time: {regular_time:.4f}s")
-    print(f"Readonly zdict time: {readonly_time:.4f}s")
-    print(f"Performance gain: {regular_time/readonly_time:.2f}x")
+    print(f"\nLookup time (100k lookups):")
+    print(f"  dict:  {dict_lookup_time*1000:.2f} ms")
+    print(f"  zdict: {zdict_lookup_time*1000:.2f} ms")
 
 
-def demo_insert_mode():
-    """Demonstrate insert-only mode."""
-    separator("Insert Mode - Append-Only Operations")
+def demo_type_compatibility():
+    """Demonstrate type compatibility with dict."""
+    separator("Type Compatibility")
     
-    # Create log storage
-    log = zdict(mode='insert')
+    z = zdict({'x': 1, 'y': 2})
+    d = {'x': 1, 'y': 2}
     
-    # Add log entries
-    for i in range(5):
-        entry_id = str(uuid4())
-        log[entry_id] = {
-            'timestamp': time.time(),
-            'message': f'Event {i} occurred',
-            'level': 'INFO'
-        }
-        print(f"Added log entry: {entry_id[:8]}...")
+    # Equality comparison
+    print(f"zdict == dict: {z == d}")
+    print(f"dict == zdict: {d == z}")
     
-    print(f"\nTotal entries: {len(log)}")
+    # Can be used where dict is expected
+    def process_dict(data: dict) -> int:
+        return sum(data.values())
     
-    # Try to update (will fail)
-    first_key = next(iter(log))
-    try:
-        log[first_key] = {'modified': True}
-    except TypeError as e:
-        print(f"\nCannot update: {e}")
-
-
-def demo_arena_mode():
-    """Demonstrate arena mode."""
-    separator("Arena Mode - Pre-allocated Memory")
+    print(f"\nPassing zdict to function expecting dict:")
+    print(f"Sum of values: {process_dict(z)}")
     
-    # Create sensor data storage
-    sensors = zdict(mode='arena')
-    
-    # Initialize with sensor readings
-    sensor_count = 100
-    for i in range(sensor_count):
-        sensors[f'sensor_{i:03d}'] = {
-            'temperature': 20.0 + i * 0.1,
-            'humidity': 45.0 + i * 0.2,
-            'pressure': 1013.25
-        }
-    
-    print(f"Initialized {sensor_count} sensors")
-    print(f"Sample reading: sensor_050 = {sensors['sensor_050']}")
-    
-    # Update readings (allowed in arena mode)
-    sensors['sensor_050']['temperature'] = 25.5
-    print(f"Updated reading: sensor_050 = {sensors['sensor_050']}")
-
-
-def demo_performance_comparison():
-    """Compare performance across modes."""
-    separator("Performance Comparison")
-    
-    # Test data
-    test_size = 5000
-    test_data = {f'key_{i}': f'value_{i}' for i in range(test_size)}
-    
-    modes = ['mutable', 'immutable', 'readonly', 'insert', 'arena']
-    results = {}
-    
-    print(f"Testing with {test_size:,} items...\n")
-    
-    for mode in modes:
-        # Create zdict
-        if mode == 'insert':
-            z = zdict(mode=mode)
-            # Time insertions
-            start = time.perf_counter()
-            for k, v in test_data.items():
-                z[k] = v
-            creation_time = time.perf_counter() - start
-        else:
-            start = time.perf_counter()
-            z = zdict(test_data, mode=mode)
-            creation_time = time.perf_counter() - start
-        
-        # Time lookups
-        lookup_keys = list(test_data.keys())[:100]
-        start = time.perf_counter()
-        for _ in range(1000):
-            for key in lookup_keys:
-                _ = z[key]
-        lookup_time = time.perf_counter() - start
-        
-        results[mode] = {
-            'creation': creation_time,
-            'lookup': lookup_time
-        }
-    
-    # Display results
-    print(f"{'Mode':<12} {'Creation (ms)':<15} {'Lookup (ms)':<15}")
-    print("-" * 42)
-    for mode, times in results.items():
-        print(f"{mode:<12} {times['creation']*1000:<15.2f} {times['lookup']*1000:<15.2f}")
+    # JSON serialization (via dict conversion)
+    import json
+    json_str = json.dumps(dict(z))
+    print(f"\nJSON serialization: {json_str}")
 
 
 def main():
     """Run all demonstrations."""
-    print("🚀 zdict Demo - High-Performance Dictionary Implementation")
+    print("🚀 zdict Demo - Experimental Dictionary Implementation")
     print(f"C Extension Available: {_C_EXTENSION_AVAILABLE}")
     
     demo_basic_usage()
-    demo_immutable_mode()
-    demo_readonly_performance()
-    demo_insert_mode()
-    demo_arena_mode()
+    demo_dict_methods()
+    demo_type_compatibility()
     demo_performance_comparison()
     
     separator("Demo Complete!")
+    print("\n⚠️  Remember: zdict is experimental. Always benchmark with your use case!")
+    print("Run 'python base_benchmark.py --num-experiments 5' for detailed performance analysis.")
     print("\nFor more information, visit: https://github.com/AdiPat/zdict")
 
 

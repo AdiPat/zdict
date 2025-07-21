@@ -46,7 +46,7 @@ pytest
 pytest --cov=zdict
 
 # Run specific test file
-pytest tests/test_zdict.py::TestZDictMutableMode
+pytest tests/test_zdict.py
 
 # Run with verbose output
 pytest -v
@@ -55,7 +55,7 @@ pytest -v
 ### Running Benchmarks
 
 ```bash
-python benchmarks/dict_vs_zdict.py
+python base_benchmark.py --num-experiments 5
 ```
 
 ## Development Workflow
@@ -80,7 +80,7 @@ We use standard Python coding conventions:
 ```python
 # Good
 def calculate_hash(data: Dict[str, Any]) -> int:
-    """Calculate hash for immutable mode.
+    """Calculate hash for the dictionary.
     
     Args:
         data: Dictionary to hash.
@@ -119,8 +119,8 @@ Types:
 
 Examples:
 ```bash
-git commit -m "feat(modes): add lazy evaluation for readonly mode"
-git commit -m "fix(insert): handle edge case for empty keys"
+git commit -m "feat: add support for custom hash functions"
+git commit -m "fix: handle edge case for empty keys"
 git commit -m "docs: update performance benchmarks in README"
 ```
 
@@ -167,13 +167,6 @@ When modifying C code:
    }
    ```
 
-3. **Mode Consistency**: Respect mode constraints.
-   ```c
-   if (!check_mutable(self)) {
-       return NULL;
-   }
-   ```
-
 ### Performance Considerations
 
 1. **Benchmark Before and After**: Use the benchmark suite.
@@ -202,15 +195,14 @@ class TestZDictFeature:
     
     def test_error_handling(self):
         """Test error conditions."""
-        z = zdict(mode='readonly')
-        with pytest.raises(TypeError):
-            z['new'] = 'value'
+        z = zdict()
+        with pytest.raises(KeyError):
+            _ = z.pop('nonexistent')
 ```
 
 ### Test Coverage
 
 - All public APIs must have tests.
-- All mode-specific behaviors must be tested.
 - Edge cases and error conditions must be covered.
 - Performance-critical paths should have benchmarks.
 
@@ -259,10 +251,8 @@ def method_name(self, param: Type) -> ReturnType:
 
 ## Getting Help
 
-- **Discord**: Join our community server.
 - **Issues**: Open a GitHub issue.
 - **Discussions**: Use GitHub Discussions for questions.
-- **Email**: core-team@zdict.dev.
 
 ## Recognition
 

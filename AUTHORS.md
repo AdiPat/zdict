@@ -1,8 +1,8 @@
 # Authors
 
-## Core Team.
+## Core Team
 
-- **Aditya Patange** ([@AdiPat](https://github.com/AdiPat)) - CTO, The Hackers Playbook.
+- **Aditya Patange** ([@AdiPat](https://github.com/AdiPat)) - Creator and Maintainer.
   - Architecture design.
   - C extension implementation.
   - Performance optimization.

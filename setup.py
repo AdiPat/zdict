@@ -10,17 +10,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 ext_modules = [
     Extension(
         "zdict._zdictcore",
-        sources=[
-            "zdict/_zdictcore.c",
-            "zdict/_zdict_modes/mutable.c",
-            "zdict/_zdict_modes/immutable.c",
-            "zdict/_zdict_modes/readonly.c",
-            "zdict/_zdict_modes/insert.c",
-            "zdict/_zdict_modes/arena.c",
-        ],
-        include_dirs=["zdict/_zdict_modes"],
-        # define_macros=[("Py_LIMITED_API", "0x03080000")],
-        # py_limited_api=True,
+        sources=["zdict/_zdictcore.c"],
         extra_compile_args=(
             ["-O3", "-Wall", "-Wextra"] if sys.platform != "win32" else ["/O2"]
         ),
@@ -30,16 +20,16 @@ ext_modules = [
 setup(
     name="zdict",
     version="1.0.0",
-    author="AdiPat",
-    author_email="aditya.patange@thehackersplaybook.org",
-    description="Blazing-fast, drop-in replacement for Python's built-in dict with multiple high-performance modes.",
+    author="Aditya Patange",
+    author_email="aditya.patange@prodigaltech.com",
+    description="Experimental high-performance dictionary implementation for Python.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/AdiPat/zdict",
     packages=find_packages(),
     ext_modules=ext_modules,
     classifiers=[
-        "Development Status :: 5 - Production/Stable",
+        "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
