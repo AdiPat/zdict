@@ -48,6 +48,7 @@ log = zdict(mode='insert')
 `zdict` automatically optimizes its internal representation based on the specified mode:
 
 ### `mutable` (default)
+
 Standard dictionary with balanced performance for mixed read/write operations.
 
 ```python
@@ -56,6 +57,7 @@ user_data['score'] += 10  # ✓ Full mutation support
 ```
 
 ### `immutable`
+
 Frozen dictionary that becomes hashable and can be used as a dictionary key.
 
 ```python
@@ -65,6 +67,7 @@ config['port'] = 9090  # ✗ Raises TypeError
 ```
 
 ### `readonly`
+
 Optimized for maximum lookup performance with no mutation allowed.
 
 ```python
@@ -77,6 +80,7 @@ value = CONSTANTS['PI']  # ✓ Optimized O(1) lookup
 ```
 
 ### `insert`
+
 Append-only dictionary optimized for write-once patterns.
 
 ```python
@@ -86,34 +90,12 @@ log_entries[existing_key] = 'new_value'  # ✗ Raises TypeError
 ```
 
 ### `arena`
+
 Pre-allocated dictionary with stable memory layout for embedded systems.
 
 ```python
 sensor_data = zdict(mode='arena')
 sensor_data.update({f'sensor_{i}': 0.0 for i in range(1000)})  # ✓ Stable memory layout
-```
-
-## Performance Benchmarks
-
-Performance comparison with Python's built-in `dict` (lower is better):
-
-```
-Lookup Performance (1M keys)
-├── dict:           1.00x (baseline).
-├── zdict[mutable]: 1.02x.
-├── zdict[readonly]: 0.43x  🚀 2.3x faster.
-└── zdict[immutable]: 0.41x 🚀 2.4x faster.
-
-Insert Performance (100K items)
-├── dict:           1.00x (baseline).
-├── zdict[mutable]: 1.03x.
-└── zdict[insert]:  0.72x  🚀 1.4x faster.
-
-Memory Usage (100K items)
-├── dict:           100.0% (baseline).
-├── zdict[mutable]: 101.2%.
-├── zdict[arena]:   87.3%   📦 13% less memory.
-└── zdict[immutable]: 89.1% 📦 11% less memory.
 ```
 
 ## Advanced Usage
@@ -172,6 +154,7 @@ zdict(data=None, *, mode='mutable', **kwargs)
 ```
 
 **Parameters:**
+
 - `data`: Initial data (dict, Mapping, or iterable of pairs).
 - `mode`: Operating mode (`'mutable'`, `'immutable'`, `'readonly'`, `'insert'`, `'arena'`).
 - `**kwargs`: Additional key-value pairs to initialize.
@@ -188,12 +171,12 @@ All standard `dict` methods are supported:
 ### Mode-Specific Behavior
 
 | Operation | `mutable` | `immutable` | `readonly` | `insert` | `arena` |
-|-----------|-----------|-------------|------------|----------|---------|
-| Read      | ✓         | ✓          | ✓ (fast)   | ✓        | ✓       |
-| Insert    | ✓         | ✗          | ✗          | ✓ (once) | ✓       |
-| Update    | ✓         | ✗          | ✗          | ✗        | ✓       |
-| Delete    | ✓         | ✗          | ✗          | ✗        | ✓       |
-| Hashable  | ✗         | ✓          | ✗          | ✗        | ✗       |
+| --------- | --------- | ----------- | ---------- | -------- | ------- |
+| Read      | ✓         | ✓           | ✓ (fast)   | ✓        | ✓       |
+| Insert    | ✓         | ✗           | ✗          | ✓ (once) | ✓       |
+| Update    | ✓         | ✗           | ✗          | ✗        | ✓       |
+| Delete    | ✓         | ✗           | ✗          | ✗        | ✓       |
+| Hashable  | ✗         | ✓           | ✗          | ✗        | ✗       |
 
 ## Architecture
 
@@ -204,6 +187,7 @@ All standard `dict` methods are supported:
 3. **Pure Python Fallback**: Ensures compatibility when C extensions are unavailable.
 
 The C extension implements:
+
 - SwissTable-inspired hash table with SIMD probing.
 - Mode-specific memory allocators.
 - Optimized string key handling.
@@ -235,6 +219,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Acknowledgments
 
 `zdict` is inspired by:
+
 - Python's `dict` implementation.
 - Google's SwissTable.
 - Facebook's F14 hash table.
