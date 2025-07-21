@@ -1,0 +1,133 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zdict"
+version = "1.0.0"
+description = "Blazing-fast, drop-in replacement for Python's built-in dict with multiple high-performance modes."
+readme = "README.md"
+license = "MIT"
+authors = [
+    {name = "Aditya Patange (AdiPat)", email = "aditya.patange@thehackersplaybook.org"},
+]
+maintainers = [
+    {name = "Aditya Patange (AdiPat)", email = "aditya.patange@thehackersplaybook.org"},
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
+keywords = ["dict", "mapping", "performance", "data-structures", "hashmap"]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.12",
+    "black>=22.0",
+    "flake8>=4.0",
+    "mypy>=0.910",
+    "cibuildwheel>=2.0",
+    "twine>=4.0",
+]
+benchmark = [
+    "pyperf>=2.0",
+    "matplotlib>=3.5",
+    "immutables>=0.15",
+    "frozendict>=2.3",
+]
+test = [
+    "pytest>=6.0",
+    "pytest-cov>=2.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/AdiPat/zdict"
+Documentation = "https://github.com/AdiPat/zdict#readme"
+Repository = "https://github.com/AdiPat/zdict"
+Issues = "https://github.com/AdiPat/zdict/issues"
+Changelog = "https://github.com/AdiPat/zdict/releases"
+
+[tool.setuptools]
+packages = ["zdict"]
+
+[tool.setuptools.package-data]
+zdict = ["*.so", "*.pyd", "*.dll"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=zdict",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = "zdict._zdictcore"
+ignore_missing_imports = true
+
+[tool.cibuildwheel]
+build = "cp38-* cp39-* cp310-* cp311-* cp312-*"
+skip = "pp* *-win32 *-manylinux_i686 *-musllinux*"
+build-verbosity = 1
+
+[tool.cibuildwheel.linux]
+before-all = "yum install -y gcc || apt-get update && apt-get install -y gcc"
+
+[tool.cibuildwheel.macos]
+before-all = "brew install gcc || true"
+
+[tool.cibuildwheel.windows]
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"

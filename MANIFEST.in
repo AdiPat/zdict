@@ -1,0 +1,15 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include setup.cfg
+include MANIFEST.in
+recursive-include zdict *.py *.c *.h
+recursive-include zdict/_zdict_modes *.c *.h
+recursive-include tests *.py
+recursive-include benchmarks *.py
+recursive-include docs *.md
+include .gitignore
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude .DS_Store

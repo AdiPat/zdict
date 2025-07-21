@@ -1,0 +1,11 @@
+# Development dependencies for zdict
+pytest>=6.0
+pytest-cov>=2.12
+black>=22.0
+flake8>=4.0
+mypy>=0.910
+cibuildwheel>=2.0
+twine>=4.0
+build>=0.10.0
+wheel>=0.38.0
+setuptools>=45.0
